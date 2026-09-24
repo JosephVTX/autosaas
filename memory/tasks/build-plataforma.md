@@ -39,6 +39,7 @@ desplegarlo en Dokploy.
 - Wayfinder (plugin de Vite) necesita PHP en el build → builder unificado PHP+Node.
 - La imagen base de FrankenPHP trae HEALTHCHECK contra el admin de Caddy → se sobreescribió.
 - Postgres en Dokploy requiere `postgres.deploy` además de `postgres.create`.
+- Mixed content (assets `http://` tras TLS en Traefik) → `$middleware->trustProxies(at: '*')` en `bootstrap/app.php` para honrar `X-Forwarded-Proto`.
 
 ## Próximos pasos sugeridos
 
