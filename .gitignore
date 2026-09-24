@@ -1,0 +1,44 @@
+# Node
+node_modules/
+dist/
+*.log
+.pnpm-store/
+
+# Env / secretos
+.env
+.env.*
+!.env.example
+*.pem
+
+# Memoria regenerable (índice) — los facts/tasks sí se versionan
+memory/index/
+
+# Laravel (apps/*)
+apps/*/vendor/
+apps/*/node_modules/
+apps/*/public/build/
+apps/*/public/hot
+apps/*/storage/*.key
+apps/*/storage/framework/cache/data/*
+apps/*/storage/framework/sessions/*
+apps/*/storage/framework/views/*
+apps/*/storage/logs/*
+apps/*/.env
+apps/*/database/*.sqlite
+
+# Bootstrap generado por Laravel Boost
+**/.mcp.json
+**/CLAUDE.md
+**/boost.json
+**/.junie/
+
+# Datos locales del control-plane
+apps/control-plane/data/
+*.sqlite
+
+# El miniproyecto es un repo independiente (ver apps/mini-saas)
+apps/mini-saas/
+
+# SO
+.DS_Store
+Thumbs.db

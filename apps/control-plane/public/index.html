@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Sistema · Control Plane</title>
+<style>
+  :root { --bg:#0b0f14; --panel:#121821; --panel2:#0f151d; --line:#1e2a38; --fg:#e6edf3; --mut:#8b9bb0; --acc:#4f9cf9; --ok:#3fb950; --warn:#d29922; --err:#f85149; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.5 ui-sans-serif,system-ui,"Segoe UI",Roboto,sans-serif; background:var(--bg); color:var(--fg); }
+  header { display:flex; align-items:center; gap:12px; padding:12px 16px; border-bottom:1px solid var(--line); background:var(--panel2); position:sticky; top:0; }
+  header h1 { font-size:15px; margin:0; font-weight:600; }
+  header .dot { width:8px; height:8px; border-radius:50%; background:var(--err); }
+  header .dot.on { background:var(--ok); }
+  header .sp { flex:1; }
+  input,button,textarea { font:inherit; color:inherit; }
+  .app { display:grid; grid-template-columns: 340px 1fr; height:calc(100vh - 49px); }
+  @media (max-width:820px){ .app{ grid-template-columns:1fr; } aside{ display:none; } }
+  aside { border-right:1px solid var(--line); overflow:auto; background:var(--panel2); }
+  .task { padding:10px 12px; border-bottom:1px solid var(--line); cursor:pointer; }
+  .task:hover { background:var(--panel); }
+  .task .t { font-weight:600; font-size:13px; }
+  .task .s { color:var(--mut); font-size:12px; display:flex; gap:8px; margin-top:4px; }
+  main { display:flex; flex-direction:column; overflow:hidden; }
+  #log { flex:1; overflow:auto; padding:16px; display:flex; flex-direction:column; gap:10px; }
+  .msg { max-width:780px; padding:10px 12px; border-radius:10px; border:1px solid var(--line); background:var(--panel); white-space:pre-wrap; }
+  .msg.me { align-self:flex-end; background:#15324e; border-color:#1d4e7a; }
+  .msg .meta { color:var(--mut); font-size:11px; margin-bottom:4px; }
+  .evt { font-size:12px; color:var(--mut); border-left:2px solid var(--line); padding-left:10px; }
+  .evt.ok { color:var(--ok); border-color:var(--ok); }
+  .evt.warn { color:var(--warn); border-color:var(--warn); }
+  .evt.err { color:var(--err); border-color:var(--err); }
+  .bar { border-top:1px solid var(--line); padding:12px; display:flex; gap:8px; background:var(--panel2); }
+  textarea { flex:1; resize:none; height:48px; background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:10px; }
+  button { background:var(--acc); border:none; border-radius:8px; padding:0 16px; cursor:pointer; color:#04121f; font-weight:600; }
+  button.ghost { background:transparent; border:1px solid var(--line); color:var(--fg); }
+  button.ok { background:var(--ok); }
+  .badge { font-size:11px; padding:1px 7px; border-radius:999px; border:1px solid var(--line); color:var(--mut); }
+  .badge.running { color:var(--acc); border-color:var(--acc); }
+  .badge.awaiting_approval { color:var(--warn); border-color:var(--warn); }
+  .badge.deployed { color:var(--ok); border-color:var(--ok); }
+  .badge.error { color:var(--err); border-color:var(--err); }
+</style>
+</head>
+<body>
+<header>
+  <span class="dot" id="dot"></span>
+  <h1>Sistema · Control Plane</h1>
+  <span class="sp"></span>
+  <input id="token" type="password" placeholder="Admin token" style="background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:6px 10px" />
+  <button class="ghost" id="save">Guardar</button>
+  <button class="ghost" id="router">Router</button>
+</header>
+<div class="app">
+  <aside id="tasks"></aside>
+  <main>
+    <div id="log"></div>
+    <div class="bar">
+      <textarea id="input" placeholder="Describe la feature o el cambio que quieres (ej: agrega un CRUD de tareas con Inertia)..."></textarea>
+      <button id="send">Enviar</button>
+    </div>
+  </main>
+</div>
+<script>
+const $ = (s) => document.querySelector(s);
+let token = localStorage.getItem("token") || "";
+$("#token").value = token;
+$("#save").onclick = () => { token = $("#token").value.trim(); localStorage.setItem("token", token); connect(); e("Token guardado", "ok"); };
+
+function ts(t){ return new Date(t).toLocaleTimeString(); }
+function e(text, cls=""){ const d=document.createElement("div"); d.className="evt "+cls; d.textContent=text; $("#log").appendChild(d); $("#log").scrollTop=$("#log").scrollHeight; }
+function msg(text, me=false){ const d=document.createElement("div"); d.className="msg"+(me?" me":""); d.textContent=text; $("#log").appendChild(d); $("#log").scrollTop=$("#log").scrollHeight; }
+async function api(p, opt={}){ opt.headers=Object.assign({"Content-Type":"application/json","x-admin-token":token},opt.headers||{}); const r=await fetch(p,opt); if(!r.ok) throw new Error((await r.text()).slice(0,200)); return r.json(); }
+
+let es=null;
+function connect(){
+  if(es) es.close();
+  if(!token) return;
+  es = new EventSource("/api/events?token="+encodeURIComponent(token));
+  es.onopen = ()=>{ $("#dot").classList.add("on"); };
+  es.onerror = ()=>{ $("#dot").classList.remove("on"); };
+  es.onmessage = (m)=>{ const ev=JSON.parse(m.data); onEvent(ev); };
+}
+function onEvent(ev){
+  const t = ev.type; const cls = t.includes("error")?"err":t.includes("approval.required")?"warn":t.includes("done")||t.includes("created")?"ok":"";
+  e(`[${ts(ev.ts)}] ${t} ${ev.data && Object.keys(ev.data).length?JSON.stringify(ev.data).slice(0,300):""}`, cls);
+  if(t==="approval.required") msg("Feature lista y verificada. Revisa y pulsa Aprobar en la lista de tareas.");
+  if(t==="task.created"||t==="stage"||t==="stage.done"||t==="deploy.done") loadTasks();
+}
+
+async function send(){
+  const message = $("#input").value.trim(); if(!message) return;
+  try {
+    msg(message, true); $("#input").value="";
+    const { task } = await api("/api/chat",{method:"POST",body:JSON.stringify({message, meta:{}})});
+    e("Tarea creada: "+task.id.slice(0,8)+" → pipeline en marcha","ok"); loadTasks();
+  } catch(err){ e("Error: "+err.message,"err"); }
+}
+$("#send").onclick = send;
+$("#input").addEventListener("keydown",(ev)=>{ if(ev.key==="Enter"&&(ev.ctrlKey||ev.metaKey)) send(); });
+
+async function loadTasks(){
+  try{
+    const { tasks } = await api("/api/tasks");
+    const box = $("#tasks"); box.innerHTML="";
+    for(const t of tasks){
+      const d=document.createElement("div"); d.className="task";
+      d.innerHTML = `<div class="t">${escapeHtml(t.title)}</div>
+        <div class="s"><span class="badge ${t.status}">${t.status}</span><span>${t.stage}</span><span>${(t.model||"").split("/").pop()||""}</span></div>`;
+      if(t.status==="awaiting_approval"){
+        const b=document.createElement("button"); b.className="ok"; b.textContent="Aprobar deploy"; b.style.marginTop="8px";
+        b.onclick=(ev)=>{ ev.stopPropagation(); approve(t.id); };
+        d.appendChild(b);
+      }
+      d.onclick=()=>detail(t.id);
+      box.appendChild(d);
+    }
+  }catch(err){ e("Error cargando tareas: "+err.message,"err"); }
+}
+async function approve(id){ try{ await api(`/api/tasks/${id}/approve`,{method:"POST"}); e("Deploy aprobado y disparado","ok"); loadTasks(); }catch(err){ e("Error: "+err.message,"err"); } }
+async function detail(id){
+  try{
+    const { task, events } = await api("/api/tasks/"+id);
+    msg(`Tarea ${task.id.slice(0,8)} — ${task.title}\nEstado: ${task.status} · Etapa: ${task.stage} · Modelo: ${task.model||"-"}`);
+    for(const ev of events.slice(-15)) e(`  ${ev.type} ${JSON.stringify(ev.data).slice(0,200)}`);
+  }catch(err){ e("Error: "+err.message,"err"); }
+}
+$("#router").onclick = async ()=>{ try{ const r=await api("/api/router/preview"); e("Router: "+JSON.stringify(r).slice(0,600),"ok"); }catch(err){ e("Error: "+err.message,"err"); } };
+function escapeHtml(s){ return String(s).replace(/[&<>"]/g,(c)=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+
+connect(); loadTasks();
+msg("Bienvenido. Pega tu admin token arriba y describe la feature que quieres crear o corregir.");
+</script>
+</body>
+</html>
